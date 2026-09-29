@@ -1,0 +1,33 @@
+app = "unsay-hackathon"
+primary_region = "fra"
+
+[build]
+
+[env]
+  PORT = "8080"
+  DATABASE_PATH = "/data/db/unsay.db"
+  RECORDINGS_DIR = "/data/recordings"
+
+[[mounts]]
+  source = "unsay_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "15s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

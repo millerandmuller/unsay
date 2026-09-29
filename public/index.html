@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Unsay — Northwind Furniture</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">Unsay</span>
+      <span class="brand-sub">Northwind Furniture · voice agent register</span>
+    </div>
+    <div id="call-status" class="call-status" hidden></div>
+  </header>
+
+  <main class="layout">
+    <section class="panel" aria-label="Register">
+      <h1>Register</h1>
+      <p class="hint">Every binding promise made on the phone, on the record. Click ▶ to hear the exact words.</p>
+      <div id="register-list" class="register-list"></div>
+      <div id="register-empty" class="empty-state" hidden>No promises on record yet. Call the demo number to make one.</div>
+    </section>
+
+    <section class="panel" aria-label="Order table">
+      <h1>Order table <span class="badge-curated">Demo order table — stands in for your ERP</span></h1>
+      <table class="orders-table">
+        <thead>
+          <tr>
+            <th>Order</th>
+            <th>Customer</th>
+            <th>Item</th>
+            <th>Delivery day</th>
+            <th>Window</th>
+          </tr>
+        </thead>
+        <tbody id="orders-body"></tbody>
+      </table>
+
+      <h2>Free slots</h2>
+      <ul id="free-slots-list" class="free-slots"></ul>
+    </section>
+  </main>
+
+  <audio id="clip-player" preload="none"></audio>
+  <script src="/app.js"></script>
+</body>
+</html>

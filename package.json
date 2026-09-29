@@ -1,0 +1,37 @@
+{
+  "name": "unsay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A voice agent that remembers what it promised on the phone and calls back when the promise stops being true.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/db && cp src/db/schema.sql dist/db/schema.sql",
+    "start": "node dist/index.js",
+    "seed": "tsx src/db/seed.ts",
+    "configure-twilio": "tsx src/scripts/configureTwilioNumber.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^5.2.1",
+    "@fastify/static": "^10.1.5",
+    "@fastify/websocket": "^11.0.2",
+    "@fastify/formbody": "^8.0.2",
+    "openai": "^4.77.0",
+    "twilio": "^5.4.3",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.10.5",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
