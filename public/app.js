@@ -2,11 +2,16 @@ const registerList = document.getElementById("register-list");
 const registerEmpty = document.getElementById("register-empty");
 const ordersBody = document.getElementById("orders-body");
 const freeSlotsList = document.getElementById("free-slots-list");
-const callStatusEl = document.getElementById("call-status");
+const statTotal = document.getElementById("stat-total");
+const statBroken = document.getElementById("stat-broken");
+const statConfirmed = document.getElementById("stat-confirmed");
+const statCall = document.getElementById("stat-call");
+const railPulse = document.getElementById("rail-pulse");
 const player = document.getElementById("clip-player");
 
 let currentPlay = null; // { entryId, btn, startMs, endMs, words, raf }
 let callStatusTimer = null;
+let prevStatusById = {}; // entry.id -> last-seen status, to detect the broken transition
 
 async function fetchJson(url, opts) {
   const res = await fetch(url, opts);
@@ -26,7 +31,7 @@ function timeAgo(iso) {
 const STATUS_LABEL = {
   active: "On record",
   broken: "Promise broken",
-  confirmed: "Confirmed by customer",
+  confirmed: "Confirmed",
   superseded: "Superseded",
   needs_human: "Needs human",
 };
@@ -35,9 +40,15 @@ function renderRegister(entries) {
   registerList.innerHTML = "";
   registerEmpty.hidden = entries.length > 0;
 
+  statTotal.textContent = entries.length;
+  statBroken.textContent = entries.filter((e) => e.status === "broken").length;
+  statConfirmed.textContent = entries.filter((e) => e.status === "confirmed").length;
+
   for (const entry of entries) {
     const div = document.createElement("div");
-    div.className = `entry status-${entry.status}`;
+    const justBroke = entry.status === "broken" && prevStatusById[entry.id] && prevStatusById[entry.id] !== "broken";
+    div.className = `entry status-${entry.status}${justBroke ? " just-broken" : ""}`;
+    prevStatusById[entry.id] = entry.status;
 
     const btn = document.createElement("button");
     btn.className = "play-btn";
@@ -51,18 +62,19 @@ function renderRegister(entries) {
     const meta = document.createElement("div");
     meta.className = "entry-meta";
     let statusText = STATUS_LABEL[entry.status] || entry.status;
+    let pillClass = `pill-${entry.status}`;
     if (entry.status === "broken") {
       const secs = entry.broken_seconds ?? 0;
       statusText += ` · ${secs}s`;
       if (entry.callback_call_status === "in_progress") statusText = "Calling…";
       if (entry.callback_call_status === "no_answer") statusText = "Call unanswered · retry in 10 min";
     }
-    meta.innerHTML = `<span class="entry-status">${statusText}</span><span>${timeAgo(entry.created_at)}</span>`;
+    meta.innerHTML = `<span class="pill ${pillClass}">${statusText}</span><span>${timeAgo(entry.created_at)}</span>`;
 
     const quote = document.createElement("div");
     quote.className = "entry-quote";
     quote.dataset.entryId = entry.id;
-    quote.textContent = entry.anchor_status === "ok" ? entry.quote : `${entry.quote} `;
+    quote.textContent = entry.quote;
     if (entry.anchor_status !== "ok") {
       const missing = document.createElement("div");
       missing.className = "anchor-missing";
@@ -156,11 +168,11 @@ function renderOrders(orders) {
   for (const order of orders) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${order.order_id}</td>
-      <td>${order.customer_name}</td>
-      <td>${order.item}</td>
-      <td contenteditable="true" data-field="delivery_day" data-order="${order.order_id}">${order.delivery_day}</td>
-      <td contenteditable="true" data-field="delivery_window" data-order="${order.order_id}">${order.delivery_window}</td>
+      <td class="py-2 pr-2 font-medium text-slate-500">${order.order_id}</td>
+      <td class="py-2 pr-2">${order.customer_name}</td>
+      <td class="py-2 pr-2 text-slate-500">${order.item}</td>
+      <td class="py-2 pr-2" contenteditable="true" data-field="delivery_day" data-order="${order.order_id}">${order.delivery_day}</td>
+      <td class="py-2" contenteditable="true" data-field="delivery_window" data-order="${order.order_id}">${order.delivery_window}</td>
     `;
     ordersBody.appendChild(tr);
   }
@@ -221,11 +233,16 @@ async function refreshAll() {
   renderFreeSlots(slots);
 }
 
-function showCallStatus(text) {
-  callStatusEl.textContent = text;
-  callStatusEl.hidden = false;
+function showCallStatus(text, live) {
+  statCall.textContent = text;
+  railPulse.classList.toggle("live", !!live);
   clearTimeout(callStatusTimer);
-  callStatusTimer = setTimeout(() => (callStatusEl.hidden = true), 15000);
+  if (live) {
+    callStatusTimer = setTimeout(() => {
+      statCall.textContent = "No active call";
+      railPulse.classList.remove("live");
+    }, 20000);
+  }
 }
 
 function connectStream() {
@@ -244,7 +261,8 @@ function connectStream() {
         failed: "Call failed",
       };
       if (event.purpose === "callback" && labels[event.status]) {
-        showCallStatus(labels[event.status]);
+        const live = !["completed", "no_answer", "failed"].includes(event.status);
+        showCallStatus(labels[event.status], live);
       }
     }
   };

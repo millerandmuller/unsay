@@ -4,44 +4,120 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Unsay — Northwind Furniture</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/style.css" />
 </head>
-<body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-mark">Unsay</span>
-      <span class="brand-sub">Northwind Furniture · voice agent register</span>
+<body class="bg-[#F7F6F2] text-stone-900 font-sans antialiased">
+  <div class="flex min-h-screen">
+    <!-- Sidebar -->
+    <aside class="hidden lg:flex w-64 flex-col bg-white border-r border-stone-100 px-5 py-6 shrink-0">
+      <div class="flex items-center gap-2.5 px-2 mb-9">
+        <div class="h-9 w-9 rounded-xl bg-[#173F2E] text-white flex items-center justify-center font-extrabold">U</div>
+        <span class="font-extrabold text-lg tracking-tight">Unsay</span>
+      </div>
+
+      <div class="side-label">Menu</div>
+      <nav class="flex flex-col gap-1 mb-7">
+        <a href="#register" class="nav-item nav-item-active"><span class="nav-icon">☎</span> Register</a>
+        <a href="#orders" class="nav-item"><span class="nav-icon">▤</span> Order table</a>
+      </nav>
+
+      <div class="side-label">General</div>
+      <nav class="flex flex-col gap-1">
+        <span class="nav-item nav-item-static"><span class="nav-icon">✓</span> Honesty</span>
+        <span class="nav-item nav-item-static"><span class="nav-icon">⚙</span> Setup</span>
+      </nav>
+
+      <div class="mt-auto pt-6 flex items-center gap-2 px-2">
+        <span id="rail-pulse" class="h-2.5 w-2.5 rounded-full bg-stone-200"></span>
+        <span class="text-xs text-stone-400">Live updates</span>
+      </div>
+    </aside>
+
+    <div class="flex-1 min-w-0">
+      <header class="px-6 md:px-10 pt-8 pb-2">
+        <h1 class="text-3xl font-extrabold tracking-tight text-stone-900">Register</h1>
+        <p class="text-sm text-stone-500 mt-1">Every binding promise made on the phone, on the record.</p>
+      </header>
+
+      <main class="px-6 md:px-10 pb-12">
+        <!-- Stat cards -->
+        <section class="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
+          <div class="stat-card stat-card-hero">
+            <div class="stat-top">
+              <span class="stat-label">Promises on record</span>
+              <span class="stat-badge stat-badge-hero">↗</span>
+            </div>
+            <div class="stat-value" id="stat-total">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-top">
+              <span class="stat-label">Broken</span>
+              <span class="stat-badge stat-badge-rose">!</span>
+            </div>
+            <div class="stat-value" id="stat-broken">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-top">
+              <span class="stat-label">Confirmed</span>
+              <span class="stat-badge stat-badge-emerald">✓</span>
+            </div>
+            <div class="stat-value" id="stat-confirmed">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-top">
+              <span class="stat-label">Call status</span>
+              <span class="stat-badge stat-badge-brand">☎</span>
+            </div>
+            <div class="stat-value stat-value-text" id="stat-call">No active call</div>
+          </div>
+        </section>
+
+        <!-- Content -->
+        <section class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+          <div id="register">
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="text-sm font-semibold text-stone-700">Register</h2>
+              <span class="text-xs text-stone-400">Click ▶ to hear the exact words</span>
+            </div>
+            <div id="register-list" class="flex flex-col gap-3"></div>
+            <div id="register-empty" class="card p-8 text-center text-sm text-stone-400" hidden>
+              No promises on record yet. Call the demo number to make one.
+            </div>
+          </div>
+
+          <div id="orders">
+            <div class="card p-5">
+              <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h2 class="text-sm font-semibold text-stone-700">Order table</h2>
+                <span class="pill pill-neutral">Demo order table — stands in for your ERP</span>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="text-left text-xs uppercase tracking-wide text-stone-400">
+                      <th class="pb-2 pr-2 font-medium">Order</th>
+                      <th class="pb-2 pr-2 font-medium">Customer</th>
+                      <th class="pb-2 pr-2 font-medium">Item</th>
+                      <th class="pb-2 pr-2 font-medium">Day</th>
+                      <th class="pb-2 font-medium">Window</th>
+                    </tr>
+                  </thead>
+                  <tbody id="orders-body" class="divide-y divide-stone-100"></tbody>
+                </table>
+              </div>
+
+              <h3 class="text-xs font-semibold uppercase tracking-wide text-stone-400 mt-6 mb-2">Free slots</h3>
+              <ul id="free-slots-list" class="flex flex-wrap gap-2"></ul>
+            </div>
+          </div>
+        </section>
+      </main>
     </div>
-    <div id="call-status" class="call-status" hidden></div>
-  </header>
-
-  <main class="layout">
-    <section class="panel" aria-label="Register">
-      <h1>Register</h1>
-      <p class="hint">Every binding promise made on the phone, on the record. Click ▶ to hear the exact words.</p>
-      <div id="register-list" class="register-list"></div>
-      <div id="register-empty" class="empty-state" hidden>No promises on record yet. Call the demo number to make one.</div>
-    </section>
-
-    <section class="panel" aria-label="Order table">
-      <h1>Order table <span class="badge-curated">Demo order table — stands in for your ERP</span></h1>
-      <table class="orders-table">
-        <thead>
-          <tr>
-            <th>Order</th>
-            <th>Customer</th>
-            <th>Item</th>
-            <th>Delivery day</th>
-            <th>Window</th>
-          </tr>
-        </thead>
-        <tbody id="orders-body"></tbody>
-      </table>
-
-      <h2>Free slots</h2>
-      <ul id="free-slots-list" class="free-slots"></ul>
-    </section>
-  </main>
+  </div>
 
   <audio id="clip-player" preload="none"></audio>
   <script src="/app.js"></script>

@@ -8,7 +8,7 @@ export interface RegisterEntryView extends RegisterEntryRow {
 }
 
 /** Joins each entry with its most recent callback call's live status so the
- * UI can show "Calling Sarah…" / "Call unanswered" without a second round trip. */
+ * UI can show "Calling…" / "Call unanswered" without a second round trip. */
 export function listRegisterView(): RegisterEntryView[] {
   return listEntries().map((entry) => {
     const call = getLatestCallForEntry(entry.id);

@@ -7,6 +7,7 @@ primary_region = "fra"
   PORT = "8080"
   DATABASE_PATH = "/data/db/unsay.db"
   RECORDINGS_DIR = "/data/recordings"
+  PUBLIC_BASE_URL = "https://unsay-hackathon.fly.dev"
 
 [[mounts]]
   source = "unsay_data"

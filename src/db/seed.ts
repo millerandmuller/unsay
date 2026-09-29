@@ -6,7 +6,7 @@ import { env } from "../config/env.js";
 const orders = [
   {
     order_id: "ORD-1042",
-    customer_name: "Sarah K.",
+    customer_name: "Chris M.",
     item: "Oak dining table",
     phone: env.demoCalleeNumber,
     delivery_day: "Thursday",
