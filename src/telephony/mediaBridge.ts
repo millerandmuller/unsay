@@ -14,7 +14,8 @@ export function runVoiceBridge(
   logLabel: string,
   sessionOptions: VoiceAgentSessionOptions,
   runTool: ToolRunner,
-  onFirstAgentAudio?: () => void
+  onFirstAgentAudio?: () => void,
+  onTwilioStart?: (callSid: string) => void
 ): void {
   let streamSid: string | undefined;
   let firstAudioFired = false;
@@ -35,7 +36,7 @@ export function runVoiceBridge(
     onToolCall: async (name, args) => runTool(name, args),
     onTranscript: (role, text) => console.log(`[${logLabel}] ${role}: "${text}"`),
     onError: (message) => console.error(`[${logLabel}] voice-agent error: ${message}`),
-    onClose: () => console.log(`[${logLabel}] voice-agent closed`),
+    onClose: (code, reason) => console.log(`[${logLabel}] voice-agent closed, code=${code} reason="${reason}"`),
   });
 
   twilioWs.on("message", (data) => {
@@ -47,13 +48,21 @@ export function runVoiceBridge(
     }
     if (msg.event === "start") {
       streamSid = msg.start.streamSid;
-      console.log(`[${logLabel}] twilio stream started (${streamSid})`);
+      console.log(`[${logLabel}] twilio stream started (${streamSid}), callSid=${msg.start.callSid}`);
+      // The stream only starts once Twilio has actually connected the call —
+      // this is the first point where call-level actions (like starting a
+      // recording) are guaranteed to be valid (Twilio error 21220 otherwise).
+      onTwilioStart?.(msg.start.callSid);
     } else if (msg.event === "media") {
       if (msg.media.track === "inbound") agent.sendAudio(msg.media.payload);
     } else if (msg.event === "stop") {
+      console.log(`[${logLabel}] twilio stream stopped`);
       agent.close();
     }
   });
 
-  twilioWs.on("close", () => agent.close());
+  twilioWs.on("close", (code, reason) => {
+    console.log(`[${logLabel}] twilio websocket closed, code=${code} reason="${reason?.toString() || ""}"`);
+    agent.close();
+  });
 }

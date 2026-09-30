@@ -12,6 +12,7 @@ export interface PlaceCallOptions {
   to: string;
   twimlUrl: string;
   statusCallbackUrl: string;
+  recordingStatusCallbackUrl: string;
 }
 
 /**
@@ -29,6 +30,10 @@ export async function placeCall(opts: PlaceCallOptions): Promise<string> {
     url: opts.twimlUrl,
     record: true,
     recordingChannels: "mono",
+    // record:true alone does NOT notify us when the recording is ready —
+    // this callback is required, or recording_url/path stay null forever.
+    recordingStatusCallback: opts.recordingStatusCallbackUrl,
+    recordingStatusCallbackEvent: ["completed"],
     statusCallback: opts.statusCallbackUrl,
     statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
     timeout: 20,

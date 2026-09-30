@@ -41,6 +41,7 @@ export async function triggerCallback(event: BrokenPromiseEvent, attemptId: stri
       to: order.phone,
       twimlUrl: `${env.publicBaseUrl}/twilio/voice/outbound-twiml?callId=${call.id}`,
       statusCallbackUrl: `${env.publicBaseUrl}/twilio/status/call?callId=${call.id}`,
+      recordingStatusCallbackUrl: `${env.publicBaseUrl}/twilio/status/recording?callId=${call.id}`,
     });
     setTwilioCallSid(call.id, sid);
   } catch (err) {

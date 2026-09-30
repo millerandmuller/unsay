@@ -1,5 +1,5 @@
 import { getCall, setTranscript, getTranscriptWords } from "../db/calls.js";
-import { listOrders } from "../db/orders.js";
+import { listOrders, getOrder } from "../db/orders.js";
 import { createRegisterEntry, getEntry, linkSupersession } from "../register/repository.js";
 import type { RegisterEntryRow, TranscriptWord } from "../db/index.js";
 import { transcribeRecording } from "./assemblyai.js";
@@ -58,10 +58,17 @@ export async function processCallRecording(callId: string): Promise<RegisterEntr
       continue;
     }
 
+    // The LLM's order_id is free-text and can be malformed (e.g. "1042"
+    // instead of "ORD-1042") — never trust it against the orders FK. Only
+    // use it if it resolves to a real order; otherwise fall back to the
+    // order the call was already bound to (via lookup_order or the
+    // triggering register entry).
+    const extractedOrderId = commitment.order_id && getOrder(commitment.order_id) ? commitment.order_id : null;
+
     const anchor = alignQuote(words, commitment.quote);
     const entry = createRegisterEntry({
       call_id: callId,
-      order_id: commitment.order_id ?? call.order_id ?? null,
+      order_id: extractedOrderId ?? call.order_id ?? null,
       field: commitment.field,
       value: commitment.value,
       quote: commitment.quote,
@@ -75,11 +82,16 @@ export async function processCallRecording(callId: string): Promise<RegisterEntr
 
   // A callback call that resolved a broken promise: link the new,
   // audio-anchored entry back to the one it supersedes (brief: "die alte
-  // Zusage bleibt als superseded stehen").
+  // Zusage bleibt als superseded stehen"). Require the value to actually
+  // differ from the old one — the agent restating its own old promise
+  // while explaining a rejection ("I told you Thursday...") extracts as a
+  // same-field "firm commitment" too, but that's history, not a resolution.
   if (call.purpose === "callback" && call.triggered_by_entry_id) {
     const triggering = getEntry(call.triggered_by_entry_id);
     if (triggering) {
-      const match = created.find((e) => e.order_id === triggering.order_id && e.field === triggering.field);
+      const match = created.find(
+        (e) => e.order_id === triggering.order_id && e.field === triggering.field && e.value !== triggering.value
+      );
       if (match) linkSupersession(match.id, triggering.id);
     }
   }

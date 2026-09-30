@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { env } from "../config/env.js";
-import { createCall, setTwilioCallSid, markCallStatus, setRecording, getCall } from "../db/calls.js";
+import { createCall, setTwilioCallSid, markCallStatus, setRecording, getCall, getCallByTwilioSid } from "../db/calls.js";
 import { markNeedsHuman } from "../register/repository.js";
 import { failCallbackAttempt, findInProgressAttempt } from "../register/callbackAttempts.js";
 import { getResolution, clearResolution } from "./callResolutions.js";
@@ -41,12 +41,6 @@ export async function registerTelephonyRoutes(app: FastifyInstance): Promise<voi
     });
     setTwilioCallSid(call.id, body.CallSid);
 
-    try {
-      await startRecordingForCall(body.CallSid, `${env.publicBaseUrl}/twilio/status/recording?callId=${call.id}`);
-    } catch (err) {
-      console.error(`[inbound] failed to start recording for ${call.id}:`, err);
-    }
-
     emitEvent({ type: "call_status", callId: call.id, status: "in_progress", purpose: "order_desk", orderId: null });
 
     reply.type("text/xml").send(
@@ -65,7 +59,15 @@ export async function registerTelephonyRoutes(app: FastifyInstance): Promise<voi
       socket,
       `order-desk:${callId}`,
       { systemPrompt: ORDER_DESK_SYSTEM_PROMPT, greeting: ORDER_DESK_GREETING, tools: ORDER_DESK_TOOLS },
-      (name, args) => runOrderDeskTool(callId, name, args)
+      (name, args) => runOrderDeskTool(callId, name, args),
+      undefined,
+      (callSid) => {
+        // Only valid once the call is actually connected (Twilio error
+        // 21220 otherwise) — the media stream's 'start' event is that signal.
+        startRecordingForCall(callSid, `${env.publicBaseUrl}/twilio/status/recording?callId=${callId}`).catch((err) => {
+          console.error(`[inbound] failed to start recording for ${callId}:`, err);
+        });
+      }
     );
   });
 
@@ -116,11 +118,18 @@ export async function registerTelephonyRoutes(app: FastifyInstance): Promise<voi
 
   // ---- Status callbacks ----
   app.post("/twilio/status/call", async (req, reply) => {
-    const { callId } = req.query as { callId: string };
+    const { callId: queryCallId } = req.query as { callId?: string };
     const body = req.body as Record<string, string>;
-    const call = getCall(callId);
+    // Outbound calls carry ?callId=...; inbound calls use the number's
+    // static statusCallback (no query param), so fall back to CallSid.
+    const call = queryCallId ? getCall(queryCallId) : getCallByTwilioSid(body.CallSid);
     reply.code(200).send();
     if (!call) return;
+    const callId = call.id;
+
+    console.log(
+      `[status/call:${callId}] CallStatus=${body.CallStatus} CallDuration=${body.CallDuration ?? "?"} Direction=${body.Direction ?? "?"}`
+    );
 
     const status = mapTwilioStatus(body.CallStatus);
     markCallStatus(callId, status);

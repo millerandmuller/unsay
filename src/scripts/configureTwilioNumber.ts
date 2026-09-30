@@ -15,9 +15,12 @@ if (!number) {
 }
 
 const voiceUrl = `${env.publicBaseUrl}/twilio/voice/inbound`;
+const statusCallback = `${env.publicBaseUrl}/twilio/status/call`;
 await twilioClient.incomingPhoneNumbers(number.sid).update({
   voiceUrl,
   voiceMethod: "POST",
+  statusCallback,
+  statusCallbackMethod: "POST",
 });
 
-console.log(`Configured ${env.twilioPhoneNumber} (sid ${number.sid}) -> voice webhook ${voiceUrl}`);
+console.log(`Configured ${env.twilioPhoneNumber} (sid ${number.sid}) -> voice webhook ${voiceUrl}, status callback ${statusCallback}`);

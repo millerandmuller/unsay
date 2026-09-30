@@ -12,6 +12,10 @@ const player = document.getElementById("clip-player");
 let currentPlay = null; // { entryId, btn, startMs, endMs, words, raf }
 let callStatusTimer = null;
 let prevStatusById = {}; // entry.id -> last-seen status, to detect the broken transition
+let editingCount = 0; // >0 while a select is focused or a cell is being edited — pauses the fallback poll
+let sseConnected = false;
+
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 
 async function fetchJson(url, opts) {
   const res = await fetch(url, opts);
@@ -24,8 +28,41 @@ function formatWindow(w) {
   return `${a}–${b}`;
 }
 
-function timeAgo(iso) {
-  return new Date(iso).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" });
+// Mirrors the server's formatPromiseTime (src/agents/callback.ts) so the
+// card and the agent's own spoken greeting always agree: "Last night ·
+// 1:41 AM" or "Wed · 7:42 PM", always Europe/Berlin, never hardcoded.
+const BERLIN_TZ = "Europe/Berlin";
+
+function berlinParts(date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: BERLIN_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (t) => parts.find((p) => p.type === t).value;
+  return { dateStr: `${get("year")}-${get("month")}-${get("day")}`, hour: Number(get("hour")) };
+}
+
+function calendarDayDiff(fromDateStr, toDateStr) {
+  const from = Date.parse(`${fromDateStr}T00:00:00Z`);
+  const to = Date.parse(`${toDateStr}T00:00:00Z`);
+  return Math.round((to - from) / 86400000);
+}
+
+function formatCardTime(iso, now = new Date()) {
+  const d = new Date(iso);
+  const entry = berlinParts(d);
+  const current = berlinParts(now);
+  const diff = calendarDayDiff(entry.dateStr, current.dateStr);
+  const isLastNight = (diff === 0 && entry.hour < 5) || (diff === 1 && entry.hour >= 18);
+
+  const time = new Intl.DateTimeFormat("en-US", { timeZone: BERLIN_TZ, hour: "numeric", minute: "2-digit", hour12: true }).format(d);
+  if (isLastNight) return `Last night · ${time}`;
+  const weekday = new Intl.DateTimeFormat("en-US", { timeZone: BERLIN_TZ, weekday: "short" }).format(d);
+  return `${weekday} · ${time}`;
 }
 
 const STATUS_LABEL = {
@@ -36,7 +73,45 @@ const STATUS_LABEL = {
   needs_human: "Needs human",
 };
 
-function renderRegister(entries) {
+// A single call moment often produces two internal rows (delivery_day +
+// delivery_window) anchored to the exact same words. Shown separately they
+// read as two promises; merge them into one card — "Thursday · 8–12 · ▶" —
+// as long as they still share a status. The moment one of them breaks
+// (e.g. only delivery_day), they naturally fall apart into separate cards.
+const FIELD_ORDER = ["delivery_day", "delivery_window", "price", "callback"];
+
+function formatFieldValue(field, value) {
+  if (field === "delivery_window") {
+    const nums = value.match(/\d{1,2}/g);
+    if (nums && nums.length >= 2) return `${nums[0]}–${nums[1]}`;
+  }
+  return value;
+}
+
+function groupRegisterEntries(entries) {
+  const groups = new Map();
+  for (const e of entries) {
+    const key = e.start_ms != null && e.end_ms != null ? `${e.call_id}|${e.start_ms}|${e.end_ms}` : `solo:${e.id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(e);
+  }
+
+  const items = [];
+  for (const [key, members] of groups) {
+    if (members.length > 1 && members.every((m) => m.status === members[0].status)) {
+      const sorted = [...members].sort((a, b) => FIELD_ORDER.indexOf(a.field) - FIELD_ORDER.indexOf(b.field));
+      const deliverySummary = sorted.map((m) => formatFieldValue(m.field, m.value)).join(" ");
+      items.push({ ...sorted[0], _deliverySummary: deliverySummary, _key: key });
+    } else {
+      for (const m of members) items.push({ ...m, _deliverySummary: formatFieldValue(m.field, m.value), _key: m.id });
+    }
+  }
+  items.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  return items;
+}
+
+function renderRegister(rawEntries) {
+  const entries = groupRegisterEntries(rawEntries);
   registerList.innerHTML = "";
   registerEmpty.hidden = entries.length > 0;
 
@@ -46,9 +121,9 @@ function renderRegister(entries) {
 
   for (const entry of entries) {
     const div = document.createElement("div");
-    const justBroke = entry.status === "broken" && prevStatusById[entry.id] && prevStatusById[entry.id] !== "broken";
+    const justBroke = entry.status === "broken" && prevStatusById[entry._key] && prevStatusById[entry._key] !== "broken";
     div.className = `entry status-${entry.status}${justBroke ? " just-broken" : ""}`;
-    prevStatusById[entry.id] = entry.status;
+    prevStatusById[entry._key] = entry.status;
 
     const btn = document.createElement("button");
     btn.className = "play-btn";
@@ -58,6 +133,12 @@ function renderRegister(entries) {
 
     const body = document.createElement("div");
     body.className = "entry-body";
+
+    const header = document.createElement("div");
+    header.className = "entry-header";
+    const who = entry.customer_name ? `${entry.customer_name} · ` : "";
+    const order = entry.order_id ? `${entry.order_id} · ` : "";
+    header.textContent = `${who}${order}Delivery: ${entry._deliverySummary}`;
 
     const meta = document.createElement("div");
     meta.className = "entry-meta";
@@ -69,7 +150,8 @@ function renderRegister(entries) {
       if (entry.callback_call_status === "in_progress") statusText = "Calling…";
       if (entry.callback_call_status === "no_answer") statusText = "Call unanswered · retry in 10 min";
     }
-    meta.innerHTML = `<span class="pill ${pillClass}">${statusText}</span><span>${timeAgo(entry.created_at)}</span>`;
+    const cardTime = formatCardTime(entry.call_started_at || entry.created_at);
+    meta.innerHTML = `<span class="pill ${pillClass}">${statusText}</span><span>${cardTime}</span>`;
 
     const quote = document.createElement("div");
     quote.className = "entry-quote";
@@ -88,6 +170,7 @@ function renderRegister(entries) {
     bar.className = "entry-progress-bar";
     progress.appendChild(bar);
 
+    body.appendChild(header);
     body.appendChild(meta);
     body.appendChild(quote);
     body.appendChild(progress);
@@ -167,18 +250,39 @@ function renderOrders(orders) {
   ordersBody.innerHTML = "";
   for (const order of orders) {
     const tr = document.createElement("tr");
+    const dayOptions = WEEKDAYS.map(
+      (d) => `<option value="${d}" ${d === order.delivery_day ? "selected" : ""}>${d}</option>`
+    ).join("");
     tr.innerHTML = `
       <td class="py-2 pr-2 font-medium text-slate-500">${order.order_id}</td>
       <td class="py-2 pr-2">${order.customer_name}</td>
       <td class="py-2 pr-2 text-slate-500">${order.item}</td>
-      <td class="py-2 pr-2" contenteditable="true" data-field="delivery_day" data-order="${order.order_id}">${order.delivery_day}</td>
-      <td class="py-2" contenteditable="true" data-field="delivery_window" data-order="${order.order_id}">${order.delivery_window}</td>
+      <td class="py-2 pr-2 order-cell" data-field="delivery_day" data-order="${order.order_id}">
+        <select class="day-select">${dayOptions}</select>
+        <span class="saved-badge" hidden>Saved</span>
+      </td>
+      <td class="py-2 order-cell" contenteditable="true" data-field="delivery_window" data-order="${order.order_id}">${order.delivery_window}</td>
     `;
     ordersBody.appendChild(tr);
   }
 
+  // Dropdown: a clean click-select, PATCH fires immediately on change — no
+  // typing, no blur race with the table refresh.
+  ordersBody.querySelectorAll(".day-select").forEach((select) => {
+    select.addEventListener("focus", () => editingCount++);
+    select.addEventListener("blur", () => editingCount--);
+    select.addEventListener("change", (e) => {
+      const cell = e.target.closest(".order-cell");
+      saveOrderField(cell.dataset.order, "delivery_day", e.target.value, cell);
+    });
+  });
+
   ordersBody.querySelectorAll("td[contenteditable]").forEach((td) => {
-    td.addEventListener("blur", onEditableBlur);
+    td.addEventListener("focus", () => editingCount++);
+    td.addEventListener("blur", () => {
+      editingCount--;
+      saveOrderField(td.dataset.order, td.dataset.field, td.textContent.trim(), td);
+    });
     td.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
@@ -189,11 +293,7 @@ function renderOrders(orders) {
 }
 
 let lastValues = {};
-async function onEditableBlur(e) {
-  const td = e.target;
-  const orderId = td.dataset.order;
-  const field = td.dataset.field;
-  const value = td.textContent.trim();
+async function saveOrderField(orderId, field, value, cellEl) {
   const key = `${orderId}:${field}`;
   if (lastValues[key] === value) return;
   lastValues[key] = value;
@@ -204,11 +304,23 @@ async function onEditableBlur(e) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ [field]: value }),
     });
-    td.classList.remove("saved");
-    void td.offsetWidth;
-    td.classList.add("saved");
+    flashSaved(cellEl);
   } catch (err) {
     console.error("Failed to save order edit", err);
+  }
+}
+
+function flashSaved(cellEl) {
+  cellEl.classList.remove("saved");
+  void cellEl.offsetWidth;
+  cellEl.classList.add("saved");
+  const badge = cellEl.querySelector(".saved-badge");
+  if (badge) {
+    badge.hidden = false;
+    clearTimeout(badge._hideTimer);
+    badge._hideTimer = setTimeout(() => {
+      badge.hidden = true;
+    }, 1200);
   }
 }
 
@@ -228,25 +340,30 @@ async function refreshAll() {
     fetchJson("/api/register"),
     fetchJson("/api/free-slots"),
   ]);
-  renderOrders(orders);
+  // Never rebuild the orders table while a cell is focused/being edited —
+  // that's what silently dropped an edit before (the table refresh raced
+  // the in-progress edit and won).
+  if (editingCount === 0) renderOrders(orders);
   renderRegister(register);
   renderFreeSlots(slots);
 }
 
 function showCallStatus(text, live) {
   statCall.textContent = text;
-  railPulse.classList.toggle("live", !!live);
   clearTimeout(callStatusTimer);
   if (live) {
     callStatusTimer = setTimeout(() => {
       statCall.textContent = "No active call";
-      railPulse.classList.remove("live");
     }, 20000);
   }
 }
 
 function connectStream() {
   const es = new EventSource("/api/stream");
+  es.onopen = () => {
+    sseConnected = true;
+    railPulse.classList.add("live"); // "Live updates" — reflects SSE connectivity, not call activity
+  };
   es.onmessage = (msg) => {
     const event = JSON.parse(msg.data);
     if (event.type === "register_updated") {
@@ -267,6 +384,8 @@ function connectStream() {
     }
   };
   es.onerror = () => {
+    sseConnected = false;
+    railPulse.classList.remove("live");
     es.close();
     setTimeout(connectStream, 2000);
   };
@@ -274,9 +393,11 @@ function connectStream() {
 
 refreshAll().catch(console.error);
 connectStream();
+// SSE is the source of truth while connected — this is a fallback only,
+// so a dropped connection doesn't leave the page stale. Never fires while
+// SSE is up, so it can't race an in-progress edit or a playing clip.
 setInterval(() => {
-  // keep "broken since Xs" ticking; skip while a clip is playing so the
-  // re-render doesn't yank the play button out from under the click.
-  if (currentPlay) return;
+  if (sseConnected) return;
+  if (editingCount > 0 || currentPlay) return;
   refreshAll().catch(() => {});
 }, 5000);

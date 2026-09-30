@@ -162,6 +162,12 @@ body { font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Robo
 .play-btn.playing { background: var(--brand); border-color: var(--brand); color: #fff; }
 
 .entry-body { flex: 1; min-width: 0; }
+.entry-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--stone-700);
+  margin-bottom: 4px;
+}
 .entry-meta {
   display: flex;
   justify-content: space-between;
@@ -189,8 +195,39 @@ body { font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Robo
 td[contenteditable="true"] { cursor: text; border-radius: 6px; padding: 6px 8px; }
 td[contenteditable="true"]:hover { background: var(--stone-100); }
 td[contenteditable="true"]:focus { outline: 2px solid var(--brand); outline-offset: -1px; background: var(--brand-tint); }
-td.saved { animation: flash 0.8s ease; }
+.order-cell.saved { animation: flash 0.8s ease; }
 @keyframes flash { from { background: var(--brand-tint); } to { background: transparent; } }
+
+.order-cell { position: relative; border-radius: 6px; }
+.day-select {
+  font: inherit;
+  color: inherit;
+  background: var(--stone-100);
+  border: 1px solid var(--stone-200);
+  border-radius: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.day-select:hover { background: #fff; border-color: var(--brand); }
+.day-select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
+
+.saved-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--emerald-600);
+  animation: savedFade 1.2s ease forwards;
+}
+.saved-badge::before { content: "✓"; }
+@keyframes savedFade {
+  0% { opacity: 0; transform: translateY(2px); }
+  15% { opacity: 1; transform: translateY(0); }
+  75% { opacity: 1; }
+  100% { opacity: 0; }
+}
 
 .free-slots li {
   font-size: 12px;

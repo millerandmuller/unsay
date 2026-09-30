@@ -39,7 +39,7 @@ export interface VoiceAgentHandlers {
   onToolCall?: (name: string, args: Record<string, unknown>, callId: string) => Promise<string>;
   onTranscript?: (role: "user" | "agent", text: string) => void;
   onError?: (message: string) => void;
-  onClose?: () => void;
+  onClose?: (code: number, reason: string) => void;
 }
 
 function buildSessionUpdate(opts: VoiceAgentSessionOptions) {
@@ -108,8 +108,10 @@ export function connectVoiceAgent(opts: VoiceAgentSessionOptions, handlers: Voic
         const rawArgs = event.args;
         const args: Record<string, unknown> =
           typeof rawArgs === "string" ? safeParseJson(rawArgs) : rawArgs && typeof rawArgs === "object" ? rawArgs : {};
+        console.log(`[voice-agent] tool.call ${name}(${JSON.stringify(args)})`);
         if (handlers.onToolCall) {
           handlers.onToolCall(name, args, event.call_id).then((result) => {
+            console.log(`[voice-agent] tool.result ${name} -> ${result}`);
             if (ws.readyState === WebSocket.OPEN) {
               ws.send(JSON.stringify({ type: "tool.result", call_id: event.call_id, result, is_error: false }));
             }
@@ -121,10 +123,18 @@ export function connectVoiceAgent(opts: VoiceAgentSessionOptions, handlers: Voic
       case "error":
         handlers.onError?.(`${event.code ?? ""} ${event.message ?? JSON.stringify(event)}`);
         break;
+      case "reply.started":
+      case "reply.done":
+      case "session.updated":
+        break;
+      default:
+        // Anything we don't explicitly handle — logged so a real close/error
+        // upstream isn't silently swallowed during debugging.
+        console.log(`[voice-agent] unhandled event: ${event.type ?? JSON.stringify(event)}`);
     }
   });
 
-  ws.on("close", () => handlers.onClose?.());
+  ws.on("close", (code, reason) => handlers.onClose?.(code, reason?.toString() || ""));
   ws.on("error", (e) => handlers.onError?.(String(e)));
 
   return {

@@ -53,7 +53,7 @@ export async function registerApiRoutes(app: FastifyInstance): Promise<void> {
     }
 
     emitEvent({ type: "register_updated" });
-    return { order: updated, brokenPromises: events.length };
+    return { order: { ...updated, phone: maskPhone(updated.phone) }, brokenPromises: events.length };
   });
 
   // Word-level transcript for the proof-beat: quote text + timing so the UI

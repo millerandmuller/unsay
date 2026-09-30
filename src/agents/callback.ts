@@ -1,5 +1,6 @@
 import type { RegisterEntryRow } from "../db/index.js";
 import { getOrder, updateOrderField, listFreeSlots, isSlotFree, takeSlot } from "../db/orders.js";
+import { getCall } from "../db/calls.js";
 import { claimCallbackAttempt, findInProgressAttempt, completeCallbackAttempt } from "../register/callbackAttempts.js";
 import { setResolution } from "../telephony/callResolutions.js";
 import type { ToolDef } from "../telephony/voiceAgentClient.js";
@@ -9,11 +10,56 @@ const FIELD_LABEL: Record<string, string> = {
   delivery_window: "delivery time window",
 };
 
-function formatCallTime(iso: string): string {
-  const d = new Date(iso);
-  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(d);
-  const time = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", hour12: true }).format(d);
-  return `${weekday} at ${time}`;
+const BERLIN_TZ = "Europe/Berlin";
+
+function berlinParts(date: Date): { dateStr: string; hour: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: BERLIN_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (t: string) => parts.find((p) => p.type === t)!.value;
+  return { dateStr: `${get("year")}-${get("month")}-${get("day")}`, hour: Number(get("hour")) };
+}
+
+function calendarDayDiff(fromDateStr: string, toDateStr: string): number {
+  const from = Date.parse(`${fromDateStr}T00:00:00Z`);
+  const to = Date.parse(`${toDateStr}T00:00:00Z`);
+  return Math.round((to - from) / 86_400_000);
+}
+
+/**
+ * Lowercase, mid-sentence time phrase for the self-quote ("on Thursday at
+ * 7:42 PM" / "last night at 1:41 AM") — always derived from the register
+ * entry's own timestamp against the current time, in Europe/Berlin, never
+ * hardcoded. "Last night" covers both a promise made earlier the same
+ * calendar day before 5am, and one made the previous calendar day after 6pm.
+ */
+function formatPromiseTime(iso: string, now: Date = new Date()): string {
+  const entry = berlinParts(new Date(iso));
+  const current = berlinParts(now);
+  const diff = calendarDayDiff(entry.dateStr, current.dateStr); // days between entry's day and today
+
+  const isLastNight = (diff === 0 && entry.hour < 5) || (diff === 1 && entry.hour >= 18);
+
+  const time = new Intl.DateTimeFormat("en-US", {
+    timeZone: BERLIN_TZ,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(new Date(iso));
+
+  if (isLastNight) return `last night at ${time}`;
+
+  const weekday = new Intl.DateTimeFormat("en-US", { timeZone: BERLIN_TZ, weekday: "long" }).format(new Date(iso));
+  return `on ${weekday} at ${time}`;
+}
+
+function capitalizeFirst(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function formatWindow(window: string): string {
@@ -43,8 +89,13 @@ export function buildCallbackContext(entry: RegisterEntryRow, newValue: string):
   if (!order) throw new Error(`Callback context requires an order (entry ${entry.id})`);
   const orderId = order.order_id;
 
+  // The promise's real timestamp is the call it was made on, not this
+  // register row's own created_at (which can lag, e.g. on reprocessing).
+  const originatingCall = getCall(entry.call_id);
+  const promiseMadeAt = originatingCall?.started_at ?? entry.created_at;
+
   const firstName = order.customer_name.split(" ")[0];
-  const oldWhen = formatCallTime(entry.created_at);
+  const oldWhen = formatPromiseTime(promiseMadeAt); // e.g. "on Thursday at 7:42 PM" or "last night at 1:41 AM"
   const fieldLabel = FIELD_LABEL[entry.field] ?? entry.field;
   const freeSlots = listFreeSlots().filter((s) => s.taken === 0);
   const slotsText = freeSlots.length
@@ -53,7 +104,7 @@ export function buildCallbackContext(entry: RegisterEntryRow, newValue: string):
 
   const sameWindowNote = entry.field === "delivery_day" ? ", same window" : "";
 
-  const greeting = `Hi ${firstName}, this is Unsay from Northwind Furniture. This call is recorded so we can keep our promises. On ${oldWhen} I told you your delivery would come ${entry.value}. That's no longer true. It moves to ${newValue}${sameWindowNote}. Does ${newValue} work for you?`;
+  const greeting = `Hi ${firstName}, this is Unsay from Northwind Furniture. This call is recorded so we can keep our promises. ${capitalizeFirst(oldWhen)} I told you your delivery would come ${entry.value}. That's no longer true. It moves to ${newValue}${sameWindowNote}. Does ${newValue} work for you?`;
 
   const systemPrompt = `You are Unsay, an outbound voice agent for Northwind Furniture calling ${firstName} back because a promise changed.
 
@@ -104,10 +155,14 @@ Keep responses short, one or two sentences, since they are spoken aloud. Be dire
     if (name === "confirm_new_value") {
       const value = String(args.value ?? "");
       const current = getOrder(orderId)![entry.field as "delivery_day" | "delivery_window"];
-      if (value !== current) {
+      // Compare loosely — the value came through an LLM tool call, not a
+      // fixed enum, so it can differ from the source by case, whitespace,
+      // or trailing punctuation ("Monday" vs "monday." vs " Monday ")
+      // without meaning anything different.
+      if (value.trim().toLowerCase() !== current.trim().toLowerCase()) {
         return JSON.stringify({ ok: false, reason: "value_no_longer_current" });
       }
-      resolveEntry(entry, callId, value);
+      resolveEntry(entry, callId, current);
       return JSON.stringify({ ok: true });
     }
 
