@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { createReadStream, existsSync } from "node:fs";
+import { createReadStream, existsSync, statSync } from "node:fs";
 import { listOrders, getOrder, updateOrderField, listFreeSlots } from "../db/orders.js";
 import { getCall, getTranscriptWords } from "../db/calls.js";
 import { reconcileOrder } from "../register/observer.js";
@@ -72,8 +72,21 @@ export async function registerApiRoutes(app: FastifyInstance): Promise<void> {
     if (!call?.recording_path || !existsSync(call.recording_path)) {
       return reply.code(404).send({ error: "no recording" });
     }
-    reply.type("audio/mpeg");
-    return reply.send(createReadStream(call.recording_path));
+    // Browsers need byte ranges to seek to the quoted second (Safari won't play at all without them).
+    const size = statSync(call.recording_path).size;
+    reply.type("audio/mpeg").header("Accept-Ranges", "bytes");
+    const match = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? "");
+    if (!match) {
+      reply.header("Content-Length", size);
+      return reply.send(createReadStream(call.recording_path));
+    }
+    const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+    const end = match[1] && match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
+    if (start >= size || start > end) {
+      return reply.code(416).header("Content-Range", `bytes */${size}`).send();
+    }
+    reply.code(206).header("Content-Range", `bytes ${start}-${end}/${size}`).header("Content-Length", end - start + 1);
+    return reply.send(createReadStream(call.recording_path, { start, end }));
   });
 
   // Live updates for the UI (register changes, call status, tool calls) —
